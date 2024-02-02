@@ -217,6 +217,12 @@ def add_rl_args(p: ArgumentParser):
         "Highly recommended for environments with continuous action spaces.",
     )
     p.add_argument(
+        "--aux_loss_coeff",
+        default=0.0,
+        type=float,
+        help="Coefficient for auxiliary loss (e.g. for predicting the value of the next state)",
+    )
+    p.add_argument(
         "--exploration_loss",
         default="entropy",
         type=str,

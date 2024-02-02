@@ -533,7 +533,7 @@ class Learner(Configurable):
 
     def _calculate_losses(
         self, mb: AttrDict, num_invalids: int
-    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, Tensor, Dict]:
+    ) -> Tuple[ActionDistribution, Tensor, Tensor | float, Optional[Tensor], Tensor | float, float, Tensor, Dict]:
         with torch.no_grad(), self.timing.add_time("losses_init"):
             recurrence: int = self.cfg.recurrence
 
@@ -579,10 +579,14 @@ class Learner(Configurable):
 
         num_trajectories = minibatch_size // recurrence
         assert core_outputs.shape[0] == minibatch_size
+        aux_loss = 0.0
 
         with self.timing.add_time("tail"):
             # calculate policy tail outside of recurrent loop
             result = self.actor_critic.forward_tail(core_outputs, values_only=False, sample_actions=False)
+            if self.cfg.aux_loss_coeff > 0.0:
+                aux_loss = self.cfg.aux_loss_coeff * self.actor_critic.aux_loss(mb.normalized_obs, core_outputs, result)
+
             action_distribution = self.actor_critic.action_distribution()
             log_prob_actions = action_distribution.log_prob(mb.actions)
             ratio = torch.exp(log_prob_actions - mb.log_prob_actions)  # pi / pi_old
@@ -663,7 +667,7 @@ class Learner(Configurable):
             adv_mean=adv_mean,
         )
 
-        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, loss_summaries
+        return action_distribution, policy_loss, exploration_loss, kl_old, kl_loss, value_loss, aux_loss, loss_summaries
 
     def _train(
         self, gpu_buffer: TensorDict, batch_size: int, experience_size: int, num_invalids: int
@@ -727,12 +731,13 @@ class Learner(Configurable):
                         kl_old,
                         kl_loss,
                         value_loss,
+                        aux_loss,
                         loss_summaries,
                     ) = self._calculate_losses(mb, num_invalids)
 
                 with timing.add_time("losses_postprocess"):
                     # noinspection PyTypeChecker
-                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss
+                    actor_loss: Tensor = policy_loss + exploration_loss + kl_loss + aux_loss
                     critic_loss = value_loss
                     loss: Tensor = actor_loss + critic_loss
 
@@ -741,12 +746,13 @@ class Learner(Configurable):
                     high_loss = 30.0
                     if torch.abs(loss) > high_loss:
                         log.warning(
-                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f (recommended to adjust the --reward_scale parameter)",
+                            "High loss value: l:%.4f pl:%.4f vl:%.4f exp_l:%.4f kl_l:%.4f aux:%.4f (recommended to adjust the --reward_scale parameter)",
                             to_scalar(loss),
                             to_scalar(policy_loss),
                             to_scalar(value_loss),
                             to_scalar(exploration_loss),
                             to_scalar(kl_loss),
+                            to_scalar(aux_loss),
                         )
 
                         # perhaps something weird is happening, we definitely want summaries from this step
@@ -859,6 +865,7 @@ class Learner(Configurable):
         stats.value = var.values.mean()
         stats.entropy = var.action_distribution.entropy().mean()
         stats.policy_loss = var.policy_loss
+        stats.aux_loss = var.aux_loss
         stats.kl_loss = var.kl_loss
         stats.value_loss = var.value_loss
         stats.exploration_loss = var.exploration_loss

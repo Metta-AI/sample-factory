@@ -183,6 +183,8 @@ class ActorCriticSharedWeights(ActorCritic):
         result["new_rnn_states"] = new_rnn_states
         return result
 
+    def aux_loss(self, normalized_obs_dict, rnn_states):
+        raise NotImplementedError()
 
 class ActorCriticSeparateWeights(ActorCritic):
     def __init__(
