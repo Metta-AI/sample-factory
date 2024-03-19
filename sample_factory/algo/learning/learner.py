@@ -362,7 +362,7 @@ class Learner(Configurable):
         if self.cfg.init_checkpoint_path is not None:
             log.info(f"No checkpoints found, init from checkpoint {self.cfg.init_checkpoint_path}")
             checkpoint_dict = torch.load(self.cfg.init_checkpoint_path, map_location=self.device)
-            self._load_state(checkpoint_dict, load_progress=load_progress)
+            self._load_state(checkpoint_dict, load_progress=False)
             return
         log.warning("Did not load from checkpoint, starting from scratch!")
 
