@@ -344,7 +344,7 @@ class Learner(Configurable):
 
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
         if self.cfg.load_checkpoint_path is not None:
-            log.debug(f"Loading model from checkpoint {self.cfg.load_checkpoint_path}")
+            log.info(f"Loading model from checkpoint {self.cfg.load_checkpoint_path}")
             checkpoint_dict = torch.load(self.cfg.load_checkpoint_path, map_location=self.device)
             self._load_state(checkpoint_dict, load_progress=load_progress)
             return
@@ -352,13 +352,19 @@ class Learner(Configurable):
         name_prefix = dict(latest="checkpoint", best="best")[self.cfg.load_checkpoint_kind]
         checkpoints = self.get_checkpoints(self.checkpoint_dir(self.cfg, policy_id), pattern=f"{name_prefix}_*")
         checkpoint_dict = self.load_checkpoint(checkpoints, self.device)
-        if checkpoint_dict is None:
-            log.debug("Did not load from checkpoint, starting from scratch!")
-        else:
+        if checkpoint_dict is not None:
             log.debug("Loading model from checkpoint")
 
             # if we're replacing our policy with another policy (under PBT), let's not reload the env_steps
             self._load_state(checkpoint_dict, load_progress=load_progress)
+            return
+
+        if self.cfg.init_checkpoint_path is not None:
+            log.info(f"No checkpoints found, init from checkpoint {self.cfg.init_checkpoint_path}")
+            checkpoint_dict = torch.load(self.cfg.init_checkpoint_path, map_location=self.device)
+            self._load_state(checkpoint_dict, load_progress=load_progress)
+            return
+        log.warning("Did not load from checkpoint, starting from scratch!")
 
     def _should_save_summaries(self):
         summaries_every_seconds = self.summary_rate_decay_seconds.at(self.train_step)

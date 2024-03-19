@@ -468,6 +468,11 @@ def add_rl_args(p: ArgumentParser):
         help="Path to a model checkpoint to load.",
     )
     p.add_argument(
+        "--init_checkpoint_path",
+        default=None,
+        help="Path to a model checkpoint to use if no latest/best is available.",
+    )
+    p.add_argument(
         "--load_checkpoint_kind",
         default="latest",
         choices=["latest", "best"],
