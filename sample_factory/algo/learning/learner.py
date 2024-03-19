@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.nn import Module
+import torch.nn as nn
 
 from sample_factory.algo.learning.rnn_utils import build_core_out_from_seq, build_rnn_inputs
 from sample_factory.algo.utils.action_distributions import get_action_distribution, is_continuous_action_space
@@ -288,13 +289,66 @@ class Learner(Configurable):
             self.train_step = checkpoint_dict["train_step"]
             self.env_steps = checkpoint_dict["env_steps"]
             self.best_performance = checkpoint_dict.get("best_performance", self.best_performance)
-        self.actor_critic.load_state_dict(checkpoint_dict["model"])
-        self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
-        self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
+
+        # Get the model state dict from the checkpoint
+        checkpoint_model_state_dict = checkpoint_dict["model"]
+
+        restore_optimizer_state = True
+        # Iterate over the state dict of the model
+        for name, param in self.actor_critic.named_parameters():
+            # If the name is not in the checkpoint or the sizes don't match
+            if name not in checkpoint_model_state_dict or param.size() != checkpoint_model_state_dict[name].size():
+                # Replace the tensor in the checkpoint with a randomly initialized tensor
+                log.warning(f"Could not load {name} from the checkpoint, replacing with random data")
+                if name.endswith("bias"):
+                    checkpoint_model_state_dict[name] = nn.init.constant_(param, 0.0)
+                else:
+                    checkpoint_model_state_dict[name] = nn.init.orthogonal_(param, gain=self.cfg.policy_init_gain)
+                restore_optimizer_state = False
+
+        # Iterate over the state dict of the model
+        for name, param in self.actor_critic.named_buffers():
+            # If the name is not in the checkpoint or the sizes don't match
+            if name not in checkpoint_model_state_dict or param.size() != checkpoint_model_state_dict[name].size():
+                # Replace the tensor in the checkpoint with a randomly initialized tensor
+                log.warning(f"Could not load {name} from the checkpoint, replacing with random data")
+                if name.endswith("running_mean"):
+                    checkpoint_model_state_dict[name] = nn.init.constant_(param, 0.0)
+                if name.endswith("running_var"):
+                    checkpoint_model_state_dict[name] = nn.init.constant_(param, 1.0)
+                restore_optimizer_state = False
+
+        # Load the state dict into the model
+        self.actor_critic.load_state_dict(checkpoint_model_state_dict, strict=False)
+
+        # Get the optimizer state dict from the checkpoint
+        if restore_optimizer_state:
+            checkpoint_optimizer_state_dict = checkpoint_dict["optimizer"]
+
+            # Iterate over the state dict of the optimizer
+            for group, saved_group in zip(self.optimizer.param_groups, checkpoint_optimizer_state_dict['param_groups']):
+                # If the sizes don't match
+                if len(group['params']) != len(saved_group['params']):
+                    # Replace the parameter group in the checkpoint with the current parameter group
+                    saved_group['params'] = group['params']
+
+
+
+            self.optimizer.load_state_dict(checkpoint_dict["optimizer"])
+            self.curr_lr = checkpoint_dict.get("curr_lr", self.cfg.learning_rate)
+        else:
+            log.warning("Not restoring optimizer state from the checkpoint")
+            self.curr_lr = self.cfg.learning_rate
 
         log.info(f"Loaded experiment state at {self.train_step=}, {self.env_steps=}")
 
     def load_from_checkpoint(self, policy_id: PolicyID, load_progress: bool = True) -> None:
+        if self.cfg.load_checkpoint_path is not None:
+            log.debug(f"Loading model from checkpoint {self.cfg.load_checkpoint_path}")
+            checkpoint_dict = torch.load(self.cfg.load_checkpoint_path, map_location=self.device)
+            self._load_state(checkpoint_dict, load_progress=load_progress)
+            return
+
         name_prefix = dict(latest="checkpoint", best="best")[self.cfg.load_checkpoint_kind]
         checkpoints = self.get_checkpoints(self.checkpoint_dir(self.cfg, policy_id), pattern=f"{name_prefix}_*")
         checkpoint_dict = self.load_checkpoint(checkpoints, self.device)
