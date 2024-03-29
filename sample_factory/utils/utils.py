@@ -15,6 +15,7 @@ from sys import argv, platform
 
 import numpy as np
 import psutil
+from pyparsing import col
 import signal_slot.signal_slot
 from _queue import Empty
 from colorlog import ColoredFormatter
@@ -32,21 +33,25 @@ log_level = logging.DEBUG
 stream_handler = logging.StreamHandler()
 stream_handler.setLevel(log_level)
 
-stream_formatter = ColoredFormatter(
-    "%(log_color)s[%(asctime)s][%(process)05d] %(message)s",
-    datefmt=None,
-    reset=True,
-    log_colors={
-        "DEBUG": "cyan",
-        "INFO": "white,bold",
-        "INFOV": "cyan,bold",
-        "WARNING": "yellow",
-        "ERROR": "red,bold",
-        "CRITICAL": "red,bg_white",
-    },
-    secondary_log_colors={},
-    style="%",
-)
+color_logging = os.getenv('COLOR_LOGGING', 'true').lower() == 'true'
+if color_logging:
+    stream_formatter = ColoredFormatter(
+        "%(log_color)s[%(asctime)s][%(process)05d] %(message)s",
+        datefmt=None,
+        reset=True,
+        log_colors={
+            "DEBUG": "cyan",
+            "INFO": "white,bold",
+            "INFOV": "cyan,bold",
+            "WARNING": "yellow",
+            "ERROR": "red,bold",
+            "CRITICAL": "red,bg_white",
+        },
+        secondary_log_colors={},
+        style="%",
+    )
+else:
+    stream_formatter = logging.Formatter(fmt="[%(asctime)s][%(process)05d] %(message)s", datefmt=None, style="%")
 stream_handler.setFormatter(stream_formatter)
 log.addHandler(stream_handler)
 
