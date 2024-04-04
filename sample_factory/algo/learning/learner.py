@@ -318,8 +318,14 @@ class Learner(Configurable):
                 log.warning(f"Could not load {name} from the checkpoint, mean=0, var=1")
                 checkpoint_model_state_dict[name] = nn.init.constant_(param, fill_val)
                 restore_optimizer_state = False
-            elif param.size() != checkpoint_model_state_dict[name].size():
-                # Create a new tensor of the correct size filled with fill_val
+            elif param.numel() < checkpoint_model_state_dict[name].numel():
+                # If param is smaller, truncate the tensor from the checkpoint
+                old_tensor = checkpoint_model_state_dict[name]
+                slices = tuple(slice(0, size) for size in param.shape)
+                checkpoint_model_state_dict[name] = old_tensor[slices]
+                restore_optimizer_state = False
+            elif param.numel() > checkpoint_model_state_dict[name].numel():
+                # If param is larger, create a new tensor and copy the values from the old tensor
                 new_tensor = torch.full(param.size(), fill_value=fill_val, device=param.device)
                 # Copy the values from the old tensor into the new one
                 old_tensor = checkpoint_model_state_dict[name]
