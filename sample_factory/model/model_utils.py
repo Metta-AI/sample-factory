@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.nn.utils import spectral_norm
 
 from sample_factory.cfg.configurable import Configurable
@@ -23,10 +24,16 @@ def get_rnn_size(cfg):
 
     return size
 
+class Mish(nn.Module):
+    def forward(self, x):
+        return x * torch.tanh(F.softplus(x))
+
 
 def nonlinearity(cfg: Config, inplace: bool = False) -> nn.Module:
     if cfg.nonlinearity == "elu":
         return nn.ELU(inplace=inplace)
+    if cfg.nonlinearity == "mish":
+        return Mish()
     elif cfg.nonlinearity == "relu":
         return nn.ReLU(inplace=inplace)
     elif cfg.nonlinearity == "tanh":

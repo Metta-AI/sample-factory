@@ -568,7 +568,7 @@ def add_model_args(p: ArgumentParser):
     )
 
     p.add_argument(
-        "--nonlinearity", default="elu", choices=["elu", "relu", "tanh"], type=str, help="Type of nonlinearity to use."
+        "--nonlinearity", default="elu", choices=["elu", "relu", "tanh", "mish"], type=str, help="Type of nonlinearity to use."
     )
     p.add_argument(
         "--policy_initialization",
