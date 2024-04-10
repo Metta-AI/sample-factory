@@ -309,13 +309,30 @@ class Learner(Configurable):
         # Iterate over the state dict of the model
         for name, param in self.actor_critic.named_buffers():
             # If the name is not in the checkpoint or the sizes don't match
-            if name not in checkpoint_model_state_dict or param.size() != checkpoint_model_state_dict[name].size():
-                # Replace the tensor in the checkpoint with a randomly initialized tensor
-                log.warning(f"Could not load {name} from the checkpoint, replacing with random data")
-                if name.endswith("running_mean"):
-                    checkpoint_model_state_dict[name] = nn.init.constant_(param, 0.0)
-                if name.endswith("running_var"):
-                    checkpoint_model_state_dict[name] = nn.init.constant_(param, 1.0)
+            if name.endswith("running_mean"):
+                fill_val = 0.0
+            elif name.endswith("running_var"):
+                fill_val = 1.0
+
+            if name not in checkpoint_model_state_dict:
+                log.warning(f"Could not load {name} from the checkpoint, mean=0, var=1")
+                checkpoint_model_state_dict[name] = nn.init.constant_(param, fill_val)
+                restore_optimizer_state = False
+            elif param.numel() < checkpoint_model_state_dict[name].numel():
+                # If param is smaller, truncate the tensor from the checkpoint
+                old_tensor = checkpoint_model_state_dict[name]
+                slices = tuple(slice(0, size) for size in param.shape)
+                checkpoint_model_state_dict[name] = old_tensor[slices]
+                restore_optimizer_state = False
+            elif param.numel() > checkpoint_model_state_dict[name].numel():
+                # If param is larger, create a new tensor and copy the values from the old tensor
+                new_tensor = torch.full(param.size(), fill_value=fill_val, device=param.device)
+                # Copy the values from the old tensor into the new one
+                old_tensor = checkpoint_model_state_dict[name]
+                slices = tuple(slice(0, size) for size in old_tensor.shape)
+                new_tensor[slices] = old_tensor
+                # Replace the old tensor with the new one in the state dict
+                checkpoint_model_state_dict[name] = new_tensor
                 restore_optimizer_state = False
 
         # Load the state dict into the model
