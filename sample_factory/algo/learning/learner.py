@@ -310,7 +310,7 @@ class Learner(Configurable):
         for name, param in self.actor_critic.named_buffers():
             # If the name is not in the checkpoint or the sizes don't match
             if name.endswith("running_mean"):
-                fill_val = 0.0
+                fill_val = fill_val = 0.0
             elif name.endswith("running_var"):
                 fill_val = 1.0
 
@@ -319,12 +319,14 @@ class Learner(Configurable):
                 checkpoint_model_state_dict[name] = nn.init.constant_(param, fill_val)
                 restore_optimizer_state = False
             elif param.numel() < checkpoint_model_state_dict[name].numel():
+                log.warning(f"Could not load {name} from the checkpoint, truncating")
                 # If param is smaller, truncate the tensor from the checkpoint
                 old_tensor = checkpoint_model_state_dict[name]
                 slices = tuple(slice(0, size) for size in param.shape)
                 checkpoint_model_state_dict[name] = old_tensor[slices]
                 restore_optimizer_state = False
             elif param.numel() > checkpoint_model_state_dict[name].numel():
+                log.warning(f"Could not load {name} from the checkpoint, expanding")
                 # If param is larger, create a new tensor and copy the values from the old tensor
                 new_tensor = torch.full(param.size(), fill_value=fill_val, device=param.device)
                 # Copy the values from the old tensor into the new one
