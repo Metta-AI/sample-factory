@@ -678,9 +678,9 @@ def add_eval_args(parser):
         "If eval_env_frameskip is different from env_frameskip, we will repeat actions during evaluation "
         "env_frameskip / eval_env_frameskip times to match the training regime.",
     )
-    parser.add_argument("--no_render", action="store_true", help="Do not render the environment during evaluation")
+    parser.add_argument("--no_render", default=False, help="Do not render the environment during evaluation")
 
-    parser.add_argument("--save_video", action="store_true", help="Save video instead of rendering during evaluation")
+    parser.add_argument("--save_video", default=False, help="Save video instead of rendering during evaluation")
     parser.add_argument(
         "--video_frames",
         default=1e9,
