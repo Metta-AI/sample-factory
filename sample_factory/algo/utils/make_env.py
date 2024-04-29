@@ -34,6 +34,8 @@ ListOfDictObservations = Sequence[DictObservations]
 
 
 def get_multiagent_info(env: Any) -> Tuple[bool, int]:
+    if hasattr(env, "unwrapped"):
+        env = env.unwrapped
     num_agents = env.num_agents if hasattr(env, "num_agents") else 1
     is_multiagent = env.is_multiagent if hasattr(env, "is_multiagent") else num_agents > 1
     assert is_multiagent or num_agents == 1, f"Invalid configuration: {is_multiagent=} and {num_agents=}"
