@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import psutil
+from tensordict import TensorDict
 import torch
 from signal_slot.signal_slot import TightLoop, Timer, signal
 
@@ -26,7 +27,7 @@ from sample_factory.algo.utils.misc import (
 from sample_factory.algo.utils.model_sharing import ParameterServer, make_parameter_client
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 from sample_factory.algo.utils.shared_buffers import policy_device
-from sample_factory.algo.utils.tensor_dict import TensorDict, to_numpy
+from sample_factory.algo.utils.tensor_dict import to_numpy
 from sample_factory.algo.utils.tensor_utils import cat_tensors, dict_of_lists_cat, ensure_torch_tensor
 from sample_factory.algo.utils.torch_utils import inference_context, init_torch_runtime, synchronize
 from sample_factory.cfg.configurable import Configurable
@@ -323,15 +324,17 @@ class InferenceWorker(HeartbeatStoppableEventLoopObject, Configurable):
                 if actor_critic.training:
                     actor_critic.eval()  # need to call this because we can be in serial mode
 
-                normalized_obs = prepare_and_normalize_obs(actor_critic, obs)
-                rnn_states = ensure_torch_tensor(rnn_states).to(self.device).float()
+                state = TensorDict({
+                    "normalized_obs": prepare_and_normalize_obs(actor_critic, obs),
+                    "rnn_states": ensure_torch_tensor(rnn_states).to(self.device).float()
+                })
 
             with timing.add_time("forward"):
-                policy_outputs = actor_critic(normalized_obs, rnn_states)
-                policy_outputs["policy_version"] = torch.empty([num_samples]).fill_(self.param_client.policy_version)
+                actor_critic(state)
+                state["policy_version"] = torch.empty([num_samples]).fill_(self.param_client.policy_version)
 
             with timing.add_time("prepare_outputs"):
-                signals_to_send = self._prepare_policy_outputs_func(num_samples, policy_outputs, self.requests)
+                signals_to_send = self._prepare_policy_outputs_func(num_samples, state, self.requests)
 
             with timing.add_time("send_messages"):
                 for actor_idx, data in signals_to_send.items():

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
+from tensordict import TensorDict
 import torch
 from torch import Tensor, nn
 from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_packed_sequence
 
 from sample_factory.algo.utils.action_distributions import is_continuous_action_space, sample_actions_log_probs
 from sample_factory.algo.utils.running_mean_std import RunningMeanStdInPlace, running_mean_std_summaries
-from sample_factory.algo.utils.tensor_dict import TensorDict
 from sample_factory.cfg.configurable import Configurable
 from sample_factory.model.action_parameterization import (
     ActionParameterizationContinuousNonAdaptiveStddev,
@@ -115,16 +115,16 @@ class ActorCritic(nn.Module, Configurable):
             assert actions.dim() == 2  # TODO: remove this once we test everything
             result["actions"] = actions.squeeze(dim=1)
 
-    def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
+    def forward_head(self, state: TensorDict):
         raise NotImplementedError()
 
-    def forward_core(self, head_output, rnn_states):
+    def forward_core(self, state: TensorDict):
         raise NotImplementedError()
 
-    def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
+    def forward_tail(self, state: TensorDict, values_only: bool, sample_actions: bool):
         raise NotImplementedError()
 
-    def forward(self, normalized_obs_dict, rnn_states, values_only: bool = False) -> TensorDict:
+    def forward(self, state: TensorDict, values_only: bool = False):
         raise NotImplementedError()
 
 
@@ -152,38 +152,32 @@ class ActorCriticSharedWeights(ActorCritic):
 
         self.apply(self.initialize_weights)
 
-    def forward_head(self, normalized_obs_dict: Dict[str, Tensor]) -> Tensor:
-        x = self.encoder(normalized_obs_dict)
-        return x
+    def forward_head(self, state: TensorDict):
+        state["head_output"] = self.encoder(state["normalized_obs"])
 
-    def forward_core(self, head_output: Tensor, rnn_states):
-        x, new_rnn_states = self.core(head_output, rnn_states)
-        return x, new_rnn_states
+    def forward_core(self, state: TensorDict):
+        state["core_output"] = self.core(state["encoder_output"], state["rnn_states"])
 
-    def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        decoder_output = self.decoder(core_output)
-        values = self.critic_linear(decoder_output).squeeze()
+    def forward_tail(self, state: TensorDict, values_only: bool, sample_actions: bool) -> TensorDict:
+        decoder_output = self.decoder(state["core_output"])
+        state["values"] = self.critic_linear(decoder_output).squeeze()
 
-        result = TensorDict(values=values)
         if values_only:
-            return result
+            return
 
         action_distribution_params, self.last_action_distribution = self.action_parameterization(decoder_output)
 
         # `action_logits` is not the best name here, better would be "action distribution parameters"
-        result["action_logits"] = action_distribution_params
+        state["action_logits"] = action_distribution_params
 
-        self._maybe_sample_actions(sample_actions, result)
-        return result
+        self._maybe_sample_actions(sample_actions, state)
 
-    def forward(self, normalized_obs_dict, rnn_states, values_only=False) -> TensorDict:
-        x = self.forward_head(normalized_obs_dict)
-        x, new_rnn_states = self.forward_core(x, rnn_states)
-        result = self.forward_tail(x, values_only, sample_actions=True)
-        result["new_rnn_states"] = new_rnn_states
-        return result
+    def forward(self, state: TensorDict, values_only=False):
+        self.forward_head(state)
+        self.forward_core(state)
+        self.forward_tail(state, values_only, sample_actions=True)
 
-    def aux_loss(self, normalized_obs_dict, rnn_states):
+    def aux_loss(self, state: TensorDict):
         raise NotImplementedError()
 
 class ActorCriticSeparateWeights(ActorCritic):
@@ -268,43 +262,39 @@ class ActorCriticSeparateWeights(ActorCritic):
         """Optimization for the feed-forward case."""
         return head_output, fake_rnn_states
 
-    def forward_head(self, normalized_obs_dict: Dict):
+    def forward_head(self, state: TensorDict):
         head_outputs = []
         for enc in self.encoders:
-            head_outputs.append(enc(normalized_obs_dict))
+            head_outputs.append(enc(state["normalized_obs"]))
 
-        return torch.cat(head_outputs, dim=1)
+        state["head_output"] = torch.cat(head_outputs, dim=1)
 
-    def forward_core(self, head_output, rnn_states):
-        return self.core_func(head_output, rnn_states)
+    def forward_core(self, state: TensorDict):
+        self.core_func(state["head_output"], state.rnn_states)
 
-    def forward_tail(self, core_output, values_only: bool, sample_actions: bool) -> TensorDict:
-        core_outputs = core_output.chunk(len(self.cores), dim=1)
+    def forward_tail(self, state: TensorDict, values_only: bool, sample_actions: bool):
+        chunked_state = state.chunk(len(self.cores), dim=1)
 
         # second core output corresponds to the critic
-        critic_decoder_output = self.critic_decoder(core_outputs[1])
-        values = self.critic_linear(critic_decoder_output).squeeze()
+        critic_decoder_output = self.critic_decoder(chunked_state[1])
+        state["values"] = self.critic_linear(critic_decoder_output).squeeze()
 
-        result = TensorDict(values=values)
         if values_only:
             # this can be further optimized - we don't need to calculate actor head/core just to get values
-            return result
+            return
 
         # first core output corresponds to the actor
-        actor_decoder_output = self.actor_decoder(core_outputs[0])
+        actor_decoder_output = self.actor_decoder(chunked_state[0])
         action_distribution_params, self.last_action_distribution = self.action_parameterization(actor_decoder_output)
 
-        result["action_logits"] = action_distribution_params
+        state["action_logits"] = action_distribution_params
 
-        self._maybe_sample_actions(sample_actions, result)
-        return result
+        self._maybe_sample_actions(sample_actions, state)
 
-    def forward(self, normalized_obs_dict, rnn_states, values_only=False) -> TensorDict:
-        x = self.forward_head(normalized_obs_dict)
-        x, new_rnn_states = self.forward_core(x, rnn_states)
-        result = self.forward_tail(x, values_only, sample_actions=True)
-        result["new_rnn_states"] = new_rnn_states
-        return result
+    def forward(self, state: TensorDict, values_only=False):
+        self.forward_head(state)
+        self.forward_core(state)
+        self.forward_tail(state, values_only, sample_actions=True)
 
 
 def default_make_actor_critic_func(cfg: Config, obs_space: ObsSpace, action_space: ActionSpace) -> ActorCritic:
