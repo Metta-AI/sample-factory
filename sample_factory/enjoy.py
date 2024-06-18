@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 import gymnasium as gym
 import numpy as np
 import torch
-from torch import Tensor
+from torch import Tensor, numel
 
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.algo.sampling.batched_sampling import preprocess_actions
@@ -273,6 +273,8 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
         )
         push_to_hf(experiment_dir(cfg=cfg), cfg.hf_repository)
 
-    return ExperimentStatus.SUCCESS, sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / sum(
-        [len(episode_rewards[i]) for i in range(env.num_agents)]
-    )
+    num_episodes = sum([len(episode_rewards[i]) for i in range(env.num_agents)])
+    if num_episodes == 0:
+        num_episodes = 1
+
+    return ExperimentStatus.SUCCESS, sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / num_episodes
