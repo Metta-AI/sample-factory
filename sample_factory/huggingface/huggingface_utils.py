@@ -6,6 +6,7 @@ from huggingface_hub import HfApi, Repository, repocard, upload_folder
 
 from sample_factory.utils.typing import Config
 from sample_factory.utils.utils import log, project_tmp_dir
+import imageio
 
 MIN_FRAME_SIZE = 180
 
@@ -38,6 +39,11 @@ def generate_replay_video(dir_path: str, frames: list, fps: int, cfg: Config):
     video.release()
     os.system(f"ffmpeg -y -i {tmp_name} -vcodec libx264 {video_name}")
     log.debug(f"Replay video saved to {video_name}!")
+    gif_path = os.path.join(os.path.dirname(video_name),
+                            os.path.splitext(video_fname)[0] + '.gif')
+    log.debug(f"Replay gif saved to {gif_path}!")
+    imageio.mimsave(gif_path, frames, fps=fps)
+
 
 
 def generate_model_card(

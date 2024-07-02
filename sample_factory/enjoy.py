@@ -58,31 +58,16 @@ def visualize_policy_inputs(normalized_obs: Dict[str, Tensor]) -> None:
 def render_frame(cfg, env, video_frames, num_episodes, last_render_start) -> float:
     render_start = time.time()
 
-    if cfg.save_video:
-        need_video_frame = len(video_frames) < cfg.video_frames or cfg.video_frames < 0 and num_episodes == 0
-        if need_video_frame:
-            frame = env.render()
-            if frame is not None:
-                video_frames.append(frame.copy())
-    else:
-        if not cfg.no_render:
-            target_delay = 1.0 / cfg.fps if cfg.fps > 0 else 0
-            current_delay = render_start - last_render_start
-            time_wait = target_delay - current_delay
-
-            if time_wait > 0:
-                # log.info("Wait time %.3f", time_wait)
-                time.sleep(time_wait)
-
-            try:
-                env.render()
-            except (gym.error.Error, TypeError) as ex:
-                debug_log_every_n(1000, f"Exception when calling env.render() {str(ex)}")
+    need_video_frame = len(video_frames) < cfg.video_frames or cfg.video_frames < 0 and num_episodes == 0
+    if need_video_frame:
+        frame = env.render()
+        if frame is not None:
+            video_frames.append(frame.copy())
 
     return render_start
 
 
-def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
+def enjoy(cfg: Config, render_mode="human") -> Tuple[StatusCode, float]:
     verbose = False
 
     cfg = load_from_checkpoint(cfg)
@@ -97,7 +82,6 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
 
     cfg.num_envs = 1
 
-    render_mode = "human"
     if cfg.save_video:
         render_mode = "rgb_array"
     elif cfg.no_render:
@@ -277,4 +261,9 @@ def enjoy(cfg: Config) -> Tuple[StatusCode, float]:
     if num_episodes == 0:
         num_episodes = 1
 
-    return ExperimentStatus.SUCCESS, sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / num_episodes
+    return {
+        "status": ExperimentStatus.SUCCESS,
+        "reward": sum([sum(episode_rewards[i]) for i in range(env.num_agents)]) / num_episodes,
+        "frames": video_frames
+    }
+
